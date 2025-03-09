@@ -17,7 +17,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files
-.env*
+.venv*
 
 # vercel
 .vercel
@@ -26,4 +26,45 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-.venv
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+
+# Django specific
+*.log
+db.sqlite3
+media/
+staticfiles/
+eld-backend/eld_project/eld_project/settings.py
+*.pyc
+
+# Ignore environment variables and secrets
+
+
+# Ignore migrations cache
+**/migrations/**/__pycache__/
+
+# Ignore coverage reports
+htmlcov/
+.coverage
+*.cover
+*.py,cover
+
+# Ignore logs and debugging files
+logs/
+*.log
+
+# Ignore VS Code and PyCharm settings
+.vscode/
+.idea/
+
+# Ignore compiled distributions
+dist/
+build/
+*.egg-info/
+eld_backend/eld_project/settings.py

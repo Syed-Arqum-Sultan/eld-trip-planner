@@ -16,7 +16,10 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from eldtrip.views import calculate_route_view, generate_eld_logs_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/calculate-route/', calculate_route_view, name='calculate_route'),
+    path('api/generate-eld-logs/', generate_eld_logs_view, name='generate_eld_logs'),
 ]
