@@ -5,6 +5,9 @@ import math
 from datetime import datetime, timedelta
 import requests
 import random
+import time
+from urllib.parse import urlencode
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -28,29 +31,12 @@ def geocode_address(address):
     except Exception as e:
         print(f"Error geocoding address: {e}")
     
-    return {
-        'lat': 39.8283 + (random.random() - 0.5) * 10,
-        'lng': -98.5795 + (random.random() - 0.5) * 20
-    }
+    return None
+
+from geopy.distance import geodesic
 
 def calculate_distance(coord1, coord2):
-    """Calculate distance between two coordinates using Haversine formula"""
-    R = 3958.8  # Earth's radius in miles
-    
-    def to_rad(value):
-        return (value * math.pi) / 180
-    
-    d_lat = to_rad(coord2['lat'] - coord1['lat'])
-    d_lon = to_rad(coord2['lng'] - coord1['lng'])
-    
-    a = (
-        math.sin(d_lat / 2) * math.sin(d_lat / 2) +
-        math.cos(to_rad(coord1['lat'])) * math.cos(to_rad(coord2['lat'])) *
-        math.sin(d_lon / 2) * math.sin(d_lon / 2)
-    )
-    
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
+    return geodesic((coord1['lat'], coord1['lng']), (coord2['lat'], coord2['lng'])).miles
 
 def generate_route_points(start, end, num_points=10):
     """Generate points along a route (simplified for demo)"""
@@ -64,23 +50,158 @@ def generate_route_points(start, end, num_points=10):
     
     return points
 
+# def calculate_route(trip_data):
+#     """Calculate route with rest stops and fuel stops"""
+#     # Geocode locations
+#     start_coords = geocode_address(trip_data['currentLocation'])
+#     pickup_coords = geocode_address(trip_data['pickupLocation'])
+#     dropoff_coords = geocode_address(trip_data['dropoffLocation'])
+    
+#     # Get road-based routes
+#     route_to_pickup = get_road_based_route(start_coords, pickup_coords)
+    
+#     # Check if routing was successful
+#     if not route_to_pickup.get("is_road_based", False):
+#         return Response({
+#             "error": f"Could not find a valid road route from {trip_data['currentLocation']} to {trip_data['pickupLocation']}. Error: {route_to_pickup.get('error', 'Unknown error')}"
+#         },status=status.HTTP_400_BAD_REQUEST)
+    
+#     route_pickup_to_dropoff = get_road_based_route(pickup_coords, dropoff_coords)
+    
+#     # Check if routing was successful
+#     if not route_pickup_to_dropoff.get("is_road_based", False):
+#         return {
+#             "error": f"Could not find a valid road route from {trip_data['pickupLocation']} to {trip_data['dropoffLocation']}. Error: {route_pickup_to_dropoff.get('error', 'Unknown error')}"
+#         }
+    
+#     # Calculate distances and times using the road-based routes
+#     distance_to_pickup = route_to_pickup["distance"]
+#     distance_pickup_to_dropoff = route_pickup_to_dropoff["distance"]
+#     total_distance = distance_to_pickup + distance_pickup_to_dropoff
+    
+#     # Use fixed 55 mph average speed for all calculations
+#     avg_speed = 55  # mph
+#     driving_time_to_pickup = distance_to_pickup / avg_speed
+#     driving_time_pickup_to_dropoff = distance_pickup_to_dropoff / avg_speed
+#     total_driving_time = driving_time_to_pickup + driving_time_pickup_to_dropoff
+    
+#     # Combine route points
+#     route_coordinates = route_to_pickup["route_points"] + route_pickup_to_dropoff["route_points"][1:]
+    
+#     # Calculate rest stops based on HOS regulations
+#     restStops = []
+#     fuelStops = []
+    
+#     # Current cycle hours from input
+#     current_cycle_hours = float(trip_data.get('currentCycleHours', 0))
+    
+#     # Calculate rest stops
+#     remaining_driving_hours = 11 - (current_cycle_hours % 11)
+#     remaining_on_duty_hours = 14 - (current_cycle_hours % 14)
+#     hours_since_last_break = current_cycle_hours % 8
+    
+#     # Track distance covered to place rest stops and fuel stops
+#     distance_covered = 0
+#     driving_time_covered = 0
+#     last_fuel_stop = 0
+    
+#     # Place stops along the route
+#     for i in range(1, len(route_coordinates)):
+#         segment_distance = calculate_distance(route_coordinates[i-1], route_coordinates[i])
+#         segment_time = segment_distance / avg_speed
+        
+#         distance_covered += segment_distance
+#         driving_time_covered += segment_time
+#         hours_since_last_break += segment_time
+
+#         current_coords = [route_coordinates[i]['lat'], route_coordinates[i]['lng']]
+
+        
+#         # Check if we need a 30-minute break
+#         if hours_since_last_break >= 8 and (not restStops or restStops[-1]['coordinates'] != [route_coordinates[i]['lat'], route_coordinates[i]['lng']]):
+#             restStops.append({
+#                 'coordinates': current_coords,
+#                 'duration': 0.5,
+#                 'reason': "30-minute break (8-hour driving limit)"
+#             })
+#             hours_since_last_break = 0
+        
+#         # Check if we need a 10-hour rest period
+#         if (driving_time_covered >= remaining_driving_hours or driving_time_covered >= remaining_on_duty_hours) and (not restStops or restStops[-1]['coordinates'] != current_coords):
+#             restStops.append({
+#                 'coordinates': [route_coordinates[i]['lat'], route_coordinates[i]['lng']],
+#                 'duration': 10,
+#                 'reason': "10-hour rest (11-hour driving limit)" if driving_time_covered >= remaining_driving_hours 
+#                           else "10-hour rest (14-hour on-duty limit)"
+#             })
+#             remaining_driving_hours = 11
+#             remaining_on_duty_hours = 14
+#             hours_since_last_break = 0
+        
+#         # Check if we need a fuel stop (every 1000 miles)
+#         if distance_covered - last_fuel_stop >= 1000 and distance_covered <= total_distance:
+#             if not fuelStops or fuelStops[-1]['coordinates'] != current_coords:
+#                 fuelStops.append({
+#                     'coordinates': [route_coordinates[i]['lat'], route_coordinates[i]['lng']],
+#                     'distance': distance_covered
+#                 })
+#                 last_fuel_stop = distance_covered
+    
+#     # Add 1 hour for pickup and 1 hour for dropoff
+#     total_trip_time = total_driving_time + sum(stop['duration'] for stop in restStops) + 2  # 1 hour each for pickup and dropoff
+    
+#     return {
+#         'startLocation': trip_data['currentLocation'],
+#         'pickupLocation': trip_data['pickupLocation'],
+#         'dropoffLocation': trip_data['dropoffLocation'],
+#         'startCoordinates': [start_coords['lat'], start_coords['lng']],
+#         'pickupCoordinates': [pickup_coords['lat'], pickup_coords['lng']],
+#         'dropoffCoordinates': [dropoff_coords['lat'], dropoff_coords['lng']],
+#         'totalDistance': total_distance,
+#         'drivingTime': total_driving_time,
+#         'totalTripTime': total_trip_time,
+#         'restStops': restStops,
+#         'fuelStops': fuelStops,
+#         'routeCoordinates': [[coord['lat'], coord['lng']] for coord in route_coordinates]
+#     }
+
 def calculate_route(trip_data):
-    """Calculate route with rest stops and fuel stops"""
+    """Calculate route with realistic rest stops and fuel stops"""
     # Geocode locations
     start_coords = geocode_address(trip_data['currentLocation'])
     pickup_coords = geocode_address(trip_data['pickupLocation'])
     dropoff_coords = geocode_address(trip_data['dropoffLocation'])
     
-    # Calculate distances
-    distance_to_pickup = calculate_distance(start_coords, pickup_coords)
-    distance_pickup_to_dropoff = calculate_distance(pickup_coords, dropoff_coords)
+    # Get road-based routes
+    route_to_pickup = get_road_based_route(start_coords, pickup_coords)
+    
+    # Check if routing was successful
+    if not route_to_pickup.get("is_road_based", False):
+        return {
+            "error": f"Could not find a valid road route from {trip_data['currentLocation']} to {trip_data['pickupLocation']}. Error: {route_to_pickup.get('error', 'Unknown error')}"
+        }
+    
+    route_pickup_to_dropoff = get_road_based_route(pickup_coords, dropoff_coords)
+    
+    # Check if routing was successful
+    if not route_pickup_to_dropoff.get("is_road_based", False):
+        return {
+            "error": f"Could not find a valid road route from {trip_data['pickupLocation']} to {trip_data['dropoffLocation']}. Error: {route_pickup_to_dropoff.get('error', 'Unknown error')}"
+        }
+    
+    # Calculate distances and times using the road-based routes
+    distance_to_pickup = route_to_pickup["distance"]
+    distance_pickup_to_dropoff = route_pickup_to_dropoff["distance"]
     total_distance = distance_to_pickup + distance_pickup_to_dropoff
     
-    # Calculate driving times (assume average speed of 55 mph)
-    avg_speed = 55
+    # Use fixed 55 mph average speed for all calculations
+    avg_speed = 55  # mph
     driving_time_to_pickup = distance_to_pickup / avg_speed
     driving_time_pickup_to_dropoff = distance_pickup_to_dropoff / avg_speed
     total_driving_time = driving_time_to_pickup + driving_time_pickup_to_dropoff
+    
+    # Combine route points
+    route_coordinates = route_to_pickup["route_points"] + route_pickup_to_dropoff["route_points"][1:]
     
     # Calculate rest stops based on HOS regulations
     restStops = []
@@ -89,63 +210,147 @@ def calculate_route(trip_data):
     # Current cycle hours from input
     current_cycle_hours = float(trip_data.get('currentCycleHours', 0))
     
-    # Calculate rest stops
-    remaining_driving_hours = 11 - (current_cycle_hours % 11)
-    remaining_on_duty_hours = 14 - (current_cycle_hours % 14)
-    hours_since_last_break = current_cycle_hours % 8
+    # Initialize HOS tracking variables
+    remaining_driving_hours = 11 - current_cycle_hours if current_cycle_hours < 11 else 0
+    remaining_on_duty_hours = 14 - current_cycle_hours if current_cycle_hours < 14 else 0
+    hours_since_last_break = min(current_cycle_hours, 8)  # Cap at 8 hours
     
-    # Generate route points
-    route_to_pickup = generate_route_points(start_coords, pickup_coords, 20)
-    route_pickup_to_dropoff = generate_route_points(pickup_coords, dropoff_coords, 30)
+    # Sampling interval for potential rest stops (approximately every 50 miles)
+    # This prevents checking every single route point and makes rest stops more realistic
+    sampling_interval = max(1, int(len(route_coordinates) / (total_distance / 50)))
     
-    # Combine all route points
-    route_coordinates = route_to_pickup + route_pickup_to_dropoff[1:]
-    
-    # Track distance covered to place rest stops and fuel stops
+    # Track distance and time for rest stop placement
     distance_covered = 0
-    driving_time_covered = 0
-    last_fuel_stop = 0
+    driving_time_accumulated = 0
+    last_fuel_distance = 0
+    last_rest_stop_distance = 0
     
-    # Place stops along the route
+    # First, calculate all distances between consecutive points
+    segment_distances = []
     for i in range(1, len(route_coordinates)):
         segment_distance = calculate_distance(route_coordinates[i-1], route_coordinates[i])
+        segment_distances.append(segment_distance)
+    
+    # Place stops along the route at reasonable intervals
+    current_index = 0
+    
+    # Handle the leg to pickup location
+    while current_index < len(segment_distances) and distance_covered < distance_to_pickup:
+        segment_distance = segment_distances[current_index]
         segment_time = segment_distance / avg_speed
         
         distance_covered += segment_distance
-        driving_time_covered += segment_time
+        driving_time_accumulated += segment_time
         hours_since_last_break += segment_time
         
-        # Check if we need a 30-minute break
-        if hours_since_last_break >= 8:
-            restStops.append({
-                'coordinates': [route_coordinates[i]['lat'], route_coordinates[i]['lng']],
-                'duration': 0.5,
-                'reason': "30-minute break (8-hour driving limit)"
-            })
-            hours_since_last_break = 0
+        # Only check for rest stops at reasonable intervals
+        if current_index % sampling_interval == 0 and current_index > 0:
+            current_coords = [route_coordinates[current_index+1]['lat'], route_coordinates[current_index+1]['lng']]
+            
+            # Check if we need a 30-minute break (after 8 hours of driving)
+            if hours_since_last_break >= 8 and distance_covered - last_rest_stop_distance >= 100:
+                restStops.append({
+                    'coordinates': current_coords,
+                    'duration': 0.5,
+                    'reason': "30-minute break (8-hour driving limit)",
+                    'distance': distance_covered,
+                    'location': "En route to pickup"
+                })
+                hours_since_last_break = 0
+                last_rest_stop_distance = distance_covered
+                remaining_driving_hours -= segment_time
+                remaining_on_duty_hours -= (segment_time + 0.5)  # Driving time + break time
+            
+            # Check if we need a 10-hour rest period
+            if remaining_driving_hours <= 1 or remaining_on_duty_hours <= 1:
+                restStops.append({
+                    'coordinates': current_coords,
+                    'duration': 10,
+                    'reason': "10-hour rest (11-hour driving limit)" if remaining_driving_hours <= 1 
+                              else "10-hour rest (14-hour on-duty limit)",
+                    'distance': distance_covered,
+                    'location': "En route to pickup"
+                })
+                remaining_driving_hours = 11
+                remaining_on_duty_hours = 14
+                hours_since_last_break = 0
+                last_rest_stop_distance = distance_covered
+            
+            # Check if we need a fuel stop (every 500-600 miles is more realistic)
+            if distance_covered - last_fuel_distance >= 550:
+                fuelStops.append({
+                    'coordinates': current_coords,
+                    'distance': distance_covered,
+                    'location': "En route to pickup"
+                })
+                last_fuel_distance = distance_covered
         
-        # Check if we need a 10-hour rest period
-        if driving_time_covered >= remaining_driving_hours or driving_time_covered >= remaining_on_duty_hours:
-            restStops.append({
-                'coordinates': [route_coordinates[i]['lat'], route_coordinates[i]['lng']],
-                'duration': 10,
-                'reason': "10-hour rest (11-hour driving limit)" if driving_time_covered >= remaining_driving_hours 
-                          else "10-hour rest (14-hour on-duty limit)"
-            })
-            remaining_driving_hours = 11
-            remaining_on_duty_hours = 14
-            hours_since_last_break = 0
-        
-        # Check if we need a fuel stop (every 1000 miles)
-        if distance_covered - last_fuel_stop >= 1000:
-            fuelStops.append({
-                'coordinates': [route_coordinates[i]['lat'], route_coordinates[i]['lng']],
-                'distance': distance_covered
-            })
-            last_fuel_stop = distance_covered
+        current_index += 1
     
-    # Add 1 hour for pickup and 1 hour for dropoff
-    total_trip_time = total_driving_time + sum(stop['duration'] for stop in restStops) + 2  # 1 hour each for pickup and dropoff
+    # Add a stop at pickup location
+    pickup_index = min(current_index, len(route_coordinates) - 1)
+    pickup_coords_list = [route_coordinates[pickup_index]['lat'], route_coordinates[pickup_index]['lng']]
+    
+    # Deduct 1 hour for pickup from remaining hours
+    remaining_driving_hours = max(0, remaining_driving_hours - 0)  # No driving during pickup
+    remaining_on_duty_hours = max(0, remaining_on_duty_hours - 1)  # 1 hour for pickup
+    
+    # Handle the leg from pickup to dropoff
+    while current_index < len(segment_distances):
+        segment_distance = segment_distances[current_index]
+        segment_time = segment_distance / avg_speed
+        
+        distance_covered += segment_distance
+        driving_time_accumulated += segment_time
+        hours_since_last_break += segment_time
+        
+        # Only check for rest stops at reasonable intervals
+        if current_index % sampling_interval == 0:
+            current_coords = [route_coordinates[current_index+1]['lat'], route_coordinates[current_index+1]['lng']]
+            
+            # Check if we need a 30-minute break
+            if hours_since_last_break >= 8 and distance_covered - last_rest_stop_distance >= 100:
+                restStops.append({
+                    'coordinates': current_coords,
+                    'duration': 0.5,
+                    'reason': "30-minute break (8-hour driving limit)",
+                    'distance': distance_covered,
+                    'location': "En route to dropoff"
+                })
+                hours_since_last_break = 0
+                last_rest_stop_distance = distance_covered
+                remaining_driving_hours -= segment_time
+                remaining_on_duty_hours -= (segment_time + 0.5)
+            
+            # Check if we need a 10-hour rest period
+            if remaining_driving_hours <= 1 or remaining_on_duty_hours <= 1:
+                restStops.append({
+                    'coordinates': current_coords,
+                    'duration': 10,
+                    'reason': "10-hour rest (11-hour driving limit)" if remaining_driving_hours <= 1 
+                              else "10-hour rest (14-hour on-duty limit)",
+                    'distance': distance_covered,
+                    'location': "En route to dropoff"
+                })
+                remaining_driving_hours = 11
+                remaining_on_duty_hours = 14
+                hours_since_last_break = 0
+                last_rest_stop_distance = distance_covered
+            
+            # Check if we need a fuel stop
+            if distance_covered - last_fuel_distance >= 550:
+                fuelStops.append({
+                    'coordinates': current_coords,
+                    'distance': distance_covered,
+                    'location': "En route to dropoff"
+                })
+                last_fuel_distance = distance_covered
+        
+        current_index += 1
+    
+    # Calculate total trip time including rest stops and pickup/dropoff
+    total_rest_time = sum(stop['duration'] for stop in restStops)
+    total_trip_time = total_driving_time + total_rest_time + 2  # 1 hour each for pickup and dropoff
     
     return {
         'startLocation': trip_data['currentLocation'],
@@ -209,7 +414,7 @@ def generate_eld_logs(route_data):
             current_hour = 8
         
         # Process the day's activities
-        while current_hour < 24 and remaining_driving_time > 0:
+        while current_hour < 24 and remaining_driving_time > 0 and len(day_log['statusBlocks']) < 4:  # Limit to 4 shifts per day
             # Check if we have a rest stop
             if (remaining_resStops and 
                 day_log['drivingHours'] + day_log['onDutyHours'] > 0 and 
@@ -330,6 +535,92 @@ def generate_eld_logs(route_data):
     
     return {'days': days}
 
+# import requests
+# import time
+
+def get_road_based_route(start_coords, end_coords, 
+                         api_key=settings.OPEN_ROUTE_KEY,
+                         max_retries=3):
+    """
+    Get a road-based route using OpenRouteService (ORS).
+    
+    Parameters:
+    - start_coords: dict with 'lat' and 'lng' keys
+    - end_coords: dict with 'lat' and 'lng' keys
+    - api_key: ORS API key
+    - max_retries: number of retry attempts if the request fails
+    
+    Returns:
+    - dict with route information or error
+    """
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            # Prepare the API request
+            coords = [[start_coords['lng'], start_coords['lat']], 
+                      [end_coords['lng'], end_coords['lat']]]
+            
+            response = requests.post(
+                "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+                json={
+                    "coordinates": coords,
+                },
+                headers={
+                    "Authorization": api_key,
+                    "Content-Type": "application/json"
+                },
+                timeout=10 + (attempt * 5)  # Increase timeout with each retry
+            )
+            # response.raise_for_status()
+            data = response.json()
+
+            # Check for errors in the response
+            if "error" in data:
+                error_code = data["error"].get("code")
+                error_message = data["error"].get("message")
+                print(f"Error {error_code}: {error_message}")
+                return {
+                    "error": f"ORS API Error {error_code}: {error_message}",
+                    "is_road_based": False
+                }
+
+            # Extract coordinates from the route
+            coordinates = data["features"][0]["geometry"]["coordinates"]
+            # Convert from [lng, lat] to [lat, lng] format
+            route_points = [{"lat": point[1], "lng": point[0]} for point in coordinates]
+
+            # Extract distance and duration
+            distance_miles = data["features"][0]["properties"]["segments"][0]["distance"] / 1609.34
+            duration_hours = data["features"][0]["properties"]["segments"][0]["duration"] / 3600
+            
+            return {
+                "route_points": route_points,
+                "distance": distance_miles,
+                "duration": duration_hours,
+                "is_road_based": True,
+                "endpoint_used": "OpenRouteService"
+            }
+        
+        except requests.RequestException as e:
+            last_error = str(e)
+            print(f"ORS attempt {attempt+1} failed: {e}")
+            if attempt < max_retries - 1:
+                # Exponential backoff between retries
+                backoff_time = 2 ** attempt
+                print(f"Retrying in {backoff_time} seconds...")
+                time.sleep(backoff_time)
+    
+    # If all retries fail, return error
+    return {
+        "error": f"All {max_retries} attempts failed with OpenRouteService: {last_error}",
+        "is_road_based": False
+    }
+
+# Example usage
+# start = {"lat": 25.0306, "lng": 67.1353}
+# end = {"lat": 32.4464, "lng": -99.7476}
+# print(get_road_based_route(start, end, api_key="YOUR_API_KEY"))
 
 
 class CalculateRouteView(APIView):
