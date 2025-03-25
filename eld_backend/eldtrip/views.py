@@ -7,6 +7,7 @@ import requests
 import random
 import time
 from urllib.parse import urlencode
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -538,7 +539,7 @@ def generate_eld_logs(route_data):
 # import time
 
 def get_road_based_route(start_coords, end_coords, 
-                         api_key="5b3ce3597851110001cf624848c7d0408f2f4c22a8cd3027a838ffbc",
+                         api_key=settings.OPEN_ROUTE_KEY,
                          max_retries=3):
     """
     Get a road-based route using OpenRouteService (ORS).
